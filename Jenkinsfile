@@ -1,45 +1,47 @@
 pipeline {
-    agent { label "Jenkins-Agent" }
+    agent any
+
     environment {
-              APP_NAME = "register-app-pipeline"
+        DOCKER_CREDENTIALS = credentials('dockerhub-creds')
     }
 
     stages {
-        stage("Cleanup Workspace") {
+        stage('Clone') {
             steps {
-                cleanWs()
+                sh '''
+                    if [ ! -d "register-app-full-devops" ]; then
+                        git clone https://github.com/Tanaji199/register-app-full-devops.git
+                    else
+                        echo "Directory already exists. Skipping clone."
+                    fi
+                '''
             }
         }
 
-        stage("Checkout from SCM") {
-               steps {
-                   git branch: 'main', credentialsId: 'github', url: 'https://github.com/Ashfaque-9x/gitops-register-app'
-               }
-        }
-
-        stage("Update the Deployment Tags") {
+        stage('Maven Build') {
             steps {
-                sh """
-                   cat deployment.yaml
-                   sed -i 's/${APP_NAME}.*/${APP_NAME}:${IMAGE_TAG}/g' deployment.yaml
-                   cat deployment.yaml
-                """
-            }
-        }
-
-        stage("Push the changed deployment file to Git") {
-            steps {
-                sh """
-                   git config --global user.name "Ashfaque-9x"
-                   git config --global user.email "ashfaque.s510@gmail.com"
-                   git add deployment.yaml
-                   git commit -m "Updated Deployment Manifest"
-                """
-                withCredentials([gitUsernamePassword(credentialsId: 'github', gitToolName: 'Default')]) {
-                  sh "git push https://github.com/Ashfaque-9x/gitops-register-app main"
+                dir('register-app-full-devops') {
+                    sh 'mvn clean package'
                 }
             }
         }
-      
+
+        stage('Dockerize Image') {
+            steps {
+                dir('register-app-full-devops') {
+                    sh 'docker build -t myapp .'
+                }
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                sh '''
+                    echo $DOCKER_CREDENTIALS_PSW | docker login -u $DOCKER_CREDENTIALS_USR --password-stdin
+                    docker tag myapp:latest tanaji199/myapp:latest
+                    docker push tanaji199/myapp:latest
+                '''
+            }
+        }
     }
 }
